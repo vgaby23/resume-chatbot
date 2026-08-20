@@ -1,0 +1,11 @@
+langchain-core
+langchain
+langchain-openai
+langgraph_supervisor
+langchain-qdrant
+streamlit
+langchain
+pydantic
+python-dotenv
+pandas
+sentence_transformers
