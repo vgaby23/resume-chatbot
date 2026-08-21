@@ -25,16 +25,15 @@ qdrant = QdrantVectorStore.from_existing_collection(
     url=os.getenv("QDRANT_URL"),
     api_key=os.getenv("QDRANT_API_KEY"),
 )
-
+print('qdrant initiated')
 reranker = CrossEncoder('mixedbread-ai/mxbai-rerank-large-v1')
 
-def candidate_search(query: str, top_k: int = 1):
+def candidate_search(query: str, top_k: int = 3):
 
     candidates = qdrant.similarity_search(query, k=top_k *3)
     text = [doc.page_content for doc in candidates]
 
     ranked = reranker.rank(query, text, return_documents=False, top_k=top_k)
-
     results = []
 
     for item in ranked:
@@ -49,7 +48,8 @@ def candidate_search(query: str, top_k: int = 1):
             "candidate_id": candidate_id,
             "category": category,
             "relevance_score": round(float(item["score"]), 3),
-            "page_content": str(doc.page_content)
+            "page_content": str(doc.page_content),
+            "metadata": repr(doc)
         })
     return results
 
@@ -68,12 +68,12 @@ class CandidateEntities(BaseModel):
       description="A list of candidate's certification portfolio mentioned in the resume.")
 
 @tool
-def find_candidate(query:str, top_k:int = 1) -> str:
+def find_candidate(query:str, top_k:int = 3) -> str:
   """
   Use this tool when searching for candidate in the vector database based on the users needs, 
   for instance applicants from certain department, or applicants with certain years of experience.
-  If the user didn't mentioned the number of candidate she needs, just show the best candidate.
-  You only need to give the summary profile of the candidate. 
+  You only need to give the summary profile of the candidate. Use the relevance score to order the candidates,
+  but don't display it to the user.
   """
   results = candidate_search(query, top_k = top_k)
   if not results:
@@ -100,7 +100,7 @@ def get_applicant_summary(category: Optional[str] = None) -> str:
             "total_applicants": len(df),
             "category_breakdown": df['Category'].value_counts().to_dict()
         }
-    
+    print(data)
     return json.dumps(data)
 
 @tool
@@ -173,3 +173,7 @@ def evaluate_job_fit(candidate_id: int, job_description: str) -> str:
         return "Error: Please provide a valid numeric candidate_id."
     except Exception as e:
         return f"An unexpected error occurred during evaluation: {str(e)}"
+
+tools_info = [find_candidate, extract_candidate_info]
+tools_evaluation = [evaluate_job_fit]
+tools_overview = [get_applicant_summary]
