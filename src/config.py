@@ -1,10 +1,7 @@
 from langchain_openai import ChatOpenAI
-from dotenv import load_dotenv, find_dotenv
 import os
 
-load_dotenv(find_dotenv())
-
-llm = ChatOpenAI(model="gpt-4o-mini", api_key=os.getenv("OPENAI_API_KEY"), temperature=0)
+llm = ChatOpenAI(model="gpt-4o-mini", api_key=os.environ["OPENAI_API_KEY"], temperature=0)
 SUPERVISOR_PROMPT = (
     "You are Sunny, a warm and professional HR Assistant Manager. Your role is to help users navigate "
     "our applicant database and candidate evaluation tools smoothly.\n\n"

@@ -4,14 +4,11 @@ from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 from langchain_qdrant import QdrantVectorStore
 from langchain_openai import OpenAIEmbeddings
-from dotenv import load_dotenv, find_dotenv
 from sentence_transformers import CrossEncoder
 import pandas as pd
-import os
 from typing import Optional
 import json
-
-load_dotenv(find_dotenv())
+import streamlit as st
 
 embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
 
@@ -22,10 +19,10 @@ collection_name = "resume"
 qdrant = QdrantVectorStore.from_existing_collection(
     embedding=embeddings,
     collection_name=collection_name,
-    url=os.getenv("QDRANT_URL"),
-    api_key=os.getenv("QDRANT_API_KEY"),
+    url=st.secrets['QDRANT_URL'],
+    api_key=st.secrets["QDRANT_API_KEY"],
 )
-print('qdrant initiated')
+
 reranker = CrossEncoder('mixedbread-ai/mxbai-rerank-large-v1')
 
 def candidate_search(query: str, top_k: int = 3):

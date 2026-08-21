@@ -1,7 +1,6 @@
 from .config import *
 from langchain.agents import create_agent
-from .tools import tools_info, tools_evaluation, tools_overview 
-from langchain_core.tools import tool
+from .tools import tools_info, tools_evaluation, tools_overview
 
 candidate_evaluation_agent = create_agent(
     model= llm,
