@@ -1,11 +1,11 @@
 langchain-core
 langchain
 langchain-openai
-langgraph_supervisor
 langchain-qdrant
+langgraph-supervisor
 streamlit
-langchain
 pydantic
 python-dotenv
 pandas
 sentence_transformers
+torchvision

@@ -8,6 +8,8 @@ from dotenv import load_dotenv, find_dotenv
 from sentence_transformers import CrossEncoder
 import pandas as pd
 import os
+from typing import Optional
+import json
 
 load_dotenv(find_dotenv())
 
@@ -16,7 +18,7 @@ embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
 df = load_listing()
 
 # Vector database
-collection_name = "resume_collection"
+collection_name = "resume"
 qdrant = QdrantVectorStore.from_existing_collection(
     embedding=embeddings,
     collection_name=collection_name,
@@ -26,23 +28,29 @@ qdrant = QdrantVectorStore.from_existing_collection(
 
 reranker = CrossEncoder('mixedbread-ai/mxbai-rerank-large-v1')
 
-def candidate_search(query: str, top_k: int = 3):
+def candidate_search(query: str, top_k: int = 1):
 
-  candidates = qdrant.similarity_search(query, k=top_k *3)
-  text = [doc.page_content for doc in candidates]
+    candidates = qdrant.similarity_search(query, k=top_k *3)
+    text = [doc.page_content for doc in candidates]
 
-  ranked = reranker.rank(query, text, return_documents=False, top_k=top_k)
+    ranked = reranker.rank(query, text, return_documents=False, top_k=top_k)
 
-  results = []
+    results = []
 
-  for item in ranked:
-    doc = candidates[item["corpus_id"]]
-    results.append({
-        "candidate_id": doc.metadata["unique_id"],
-        "category": doc.metadata['category'],
-        "relevance_score": round(float(item["score"]),3),
-        "resume": doc.metadata['resume']
-    })
+    for item in ranked:
+        doc = candidates[item["corpus_id"]]
+        raw_id = doc.metadata.get("unique_id")
+        candidate_id = int(raw_id.values[0]) if isinstance(raw_id, pd.Series) else int(raw_id)
+        
+        raw_cat = doc.metadata.get("category", "")
+        category = str(raw_cat.values[0]) if isinstance(raw_cat, pd.Series) else str(raw_cat)
+
+        results.append({
+            "candidate_id": candidate_id,
+            "category": category,
+            "relevance_score": round(float(item["score"]), 3),
+            "page_content": str(doc.page_content)
+        })
     return results
 
 class CandidateEntities(BaseModel):
@@ -60,20 +68,21 @@ class CandidateEntities(BaseModel):
       description="A list of candidate's certification portfolio mentioned in the resume.")
 
 @tool
-def find_candidate(query:str) -> str:
+def find_candidate(query:str, top_k:int = 1) -> str:
   """
   Use this tool when searching for candidate in the vector database based on the users needs, 
   for instance applicants from certain department, or applicants with certain years of experience.
-  Always use this tool when the user mentioned the name of the department
+  If the user didn't mentioned the number of candidate she needs, just show the best candidate.
+  You only need to give the summary profile of the candidate. 
   """
-  results = candidate_search(query, top_k = 3)
+  results = candidate_search(query, top_k = top_k)
   if not results:
     return "No matched candidates found"
-  lines = [f"- {r['candidate_id']} | ({r['category']}) - {r['resume']}" for r in results]
-  return "\n".join(lines)
+  else:
+    return json.dumps(results, indent=2, default=str)
 
 @tool
-def get_applicant_summary(category: str) -> str:
+def get_applicant_summary(category: Optional[str] = None) -> str:
     """
     Use this tool to get a statistical summary of the applicants in the database.
     If a specific 'category' is provided, it summarizes that category.
@@ -82,13 +91,17 @@ def get_applicant_summary(category: str) -> str:
     if category:
         subset = df[df['Category'].str.lower() == category.lower()]
         if subset.empty:
-            return f"No applicants found for the category: {category}."
-        count = len(subset)
-        return f"Summary for {category}: {count} total applicants."
+            data = {"status": "not_found", "category": category, "applicant_count": 0}
+        else:
+            data = {"status": "success", "category": category, "applicant_count": len(subset)}
     else:
-        total_count = len(df)
-        category_counts = df['Category'].value_counts().to_dict()
-        return f"Overall Summary: {total_count} total applicants. Breakdown by category: {category_counts}"
+        data = {
+            "status": "success",
+            "total_applicants": len(df),
+            "category_breakdown": df['Category'].value_counts().to_dict()
+        }
+    
+    return json.dumps(data)
 
 @tool
 def extract_candidate_info(candidate_id: int) -> str:
@@ -97,29 +110,21 @@ def extract_candidate_info(candidate_id: int) -> str:
     technical skills, working experience history, portfolio and certifications) 
     from a candidate's resume using their unique ID.
     """
-    try:
-        candidate_id = int(candidate_id)
-        subset = df[df['ID'] == candidate_id]
+    candidate_id = int(candidate_id)
+    subset = df[df['ID'] == candidate_id]
+    
+    if subset.empty:
+        return f"Error: No candidate found with ID '{candidate_id}'."
         
-        if subset.empty:
-            return f"Error: No candidate found with ID '{candidate_id}'."
-            
-        # Get the raw resume text
-        resume_text = subset['Resume_str'].values[0]
-        
-        structured_llm = llm.with_structured_output(CandidateEntities)
-        
-        extracted_data = structured_llm.invoke(
-            f"Extract the requested information from this resume:\n\n{resume_text}"
-        )
-        response = extracted_data['messages'][-1].content
-        
-        return response
-        
-    except ValueError:
-        return "Error: Please provide a valid numeric ID."
-    except Exception as e:
-        return f"An unexpected error occurred during extraction: {str(e)}"
+    # Get the raw resume text
+    resume_text = subset['Resume_str'].values[0]
+    
+    structured_llm = llm.with_structured_output(CandidateEntities)
+    
+    extracted_data: CandidateEntities = structured_llm.invoke(
+        f"Extract the requested information from this resume:\n\n{resume_text}"
+    )
+    return extracted_data.model_dump_json(indent=2) 
 
 class JobFitEvaluation(BaseModel):
     match_score_percentage: int = Field(
@@ -161,15 +166,10 @@ def evaluate_job_fit(candidate_id: int, job_description: str) -> str:
         )
         
         # Run the evaluation
-        evaluation_result = structured_eval_llm.invoke(evaluation_prompt)
+        evaluation_result: JobFitEvaluation = structured_eval_llm.invoke(evaluation_prompt)
+        return evaluation_result.model_dump_json(indent=2)
 
-        response = evaluation_result['messages'][-1].content
-        
-        return response
-        
     except ValueError:
         return "Error: Please provide a valid numeric candidate_id."
     except Exception as e:
         return f"An unexpected error occurred during evaluation: {str(e)}"
-
-tools = [find_candidate, get_applicant_summary, extract_candidate_info, evaluate_job_fit]

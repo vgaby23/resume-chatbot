@@ -1,8 +1,10 @@
 import pandas as pd
+from pathlib import Path
 
 def load_listing():
 
-    df = pd.read_csv('Resume.csv', sep=',')
+    csv_path = Path(__file__).resolve().parent.parent / "dataset" / "Resume.csv"
+    df = pd.read_csv(csv_path, sep=',')
 
     data = df[['ID', 'Resume_str', 'Category']].copy()
 
